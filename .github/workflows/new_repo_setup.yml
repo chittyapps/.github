@@ -1,0 +1,292 @@
+name: New Repository Setup
+
+on:
+  create:  # Triggered when a branch or tag is created
+  workflow_dispatch:
+    inputs:
+      setup_type:
+        description: 'Type of setup to perform'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - minimal
+          - documentation-only
+
+jobs:
+  setup-new-repo:
+    name: Initialize New Repository
+    runs-on: ubuntu-latest
+    # Only run on main/master branch creation or manual trigger
+    if: |
+      (github.event_name == 'create' && github.event.ref_type == 'branch' && 
+       (github.event.ref == 'main' || github.event.ref == 'master')) ||
+      github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Check existing files
+        id: check-files
+        run: |
+          echo "=== Checking Existing Files ==="
+          
+          # Check what files already exist
+          has_readme="false"
+          has_license="false"
+          has_gitignore="false"
+          has_contributing="false"
+          
+          [ -f "README.md" ] || [ -f "README" ] || [ -f "readme.md" ] && has_readme="true"
+          [ -f "LICENSE" ] || [ -f "LICENSE.md" ] || [ -f "LICENSE.txt" ] && has_license="true"
+          [ -f ".gitignore" ] && has_gitignore="true"
+          [ -f "CONTRIBUTING.md" ] || [ -f "contributing.md" ] && has_contributing="true"
+          
+          echo "has_readme=$has_readme" >> $GITHUB_OUTPUT
+          echo "has_license=$has_license" >> $GITHUB_OUTPUT
+          echo "has_gitignore=$has_gitignore" >> $GITHUB_OUTPUT
+          echo "has_contributing=$has_contributing" >> $GITHUB_OUTPUT
+          
+          echo "README exists: $has_readme"
+          echo "LICENSE exists: $has_license"
+          echo ".gitignore exists: $has_gitignore"
+          echo "CONTRIBUTING exists: $has_contributing"
+      
+      - name: Create README
+        if: steps.check-files.outputs.has_readme == 'false'
+        run: |
+          cat > README.md << 'EOF'
+# ${{ github.event.repository.name }}
+
+> ${{ github.event.repository.description || 'A new repository in the ' + github.repository_owner + ' organization' }}
+
+## Getting Started
+
+This repository was automatically initialized. Please update this README with:
+
+- [ ] Project description and purpose
+- [ ] Installation instructions
+- [ ] Usage examples
+- [ ] Contributing guidelines
+- [ ] License information
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/${{ github.repository }}.git
+cd ${{ github.event.repository.name }}
+
+# Add your setup instructions here
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project needs a license. See [Choose a License](https://choosealicense.com/) for help selecting one.
+
+---
+
+**${{ github.repository_owner }}** - Building quality software
+EOF
+          
+          echo "✅ Created README.md"
+      
+      - name: Create .gitignore
+        if: steps.check-files.outputs.has_gitignore == 'false'
+        run: |
+          # Detect primary language and create appropriate .gitignore
+          
+          # Default .gitignore
+          cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+vendor/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Build outputs
+dist/
+build/
+out/
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.phpunit.result.cache
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+EOF
+          
+          echo "✅ Created .gitignore"
+      
+      - name: Create MIT License
+        if: steps.check-files.outputs.has_license == 'false' && github.event.inputs.setup_type != 'documentation-only'
+        run: |
+          year=$(date +%Y)
+          cat > LICENSE << EOF
+MIT License
+
+Copyright (c) $year ${{ github.repository_owner }}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+EOF
+          
+          echo "✅ Created LICENSE (MIT)"
+      
+      - name: Create CONTRIBUTING.md
+        if: steps.check-files.outputs.has_contributing == 'false' && github.event.inputs.setup_type == 'full'
+        run: |
+          cat > CONTRIBUTING.md << 'EOF'
+# Contributing to ${{ github.event.repository.name }}
+
+Thank you for your interest in contributing! We welcome contributions from everyone.
+
+## How to Contribute
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Code of Conduct
+
+Please note that this project is released with a Contributor Code of Conduct. 
+By participating in this project you agree to abide by its terms.
+
+## Questions?
+
+Feel free to open an issue with any questions or concerns.
+EOF
+          
+          echo "✅ Created CONTRIBUTING.md"
+      
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add .
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🎉 Initialize repository with documentation
+
+- Add README.md with setup instructions
+- Add .gitignore for common files
+- Add LICENSE (MIT)
+- Add CONTRIBUTING.md guidelines
+
+[skip ci]"
+            
+            git push
+            echo "✅ Pushed initial documentation"
+          fi
+      
+      - name: Create initial issue
+        if: github.event_name == 'create'
+        run: |
+          gh issue create \
+            --title "🚀 Complete repository setup" \
+            --body "Welcome to your new repository! Here's a checklist to get started:
+
+## Repository Setup Checklist
+
+### Documentation
+- [ ] Update README.md with project-specific information
+- [ ] Add detailed installation instructions
+- [ ] Include usage examples and API documentation
+- [ ] Add badges (build status, license, version)
+
+### Configuration  
+- [ ] Set repository description in Settings
+- [ ] Add relevant topics/tags (at least 3-5)
+- [ ] Configure branch protection rules
+- [ ] Set up GitHub Pages if needed
+
+### Code Quality
+- [ ] Set up linting and formatting
+- [ ] Configure test framework
+- [ ] Add CI/CD workflows
+- [ ] Set up code coverage reporting
+
+### Community
+- [ ] Choose appropriate license
+- [ ] Add CODE_OF_CONDUCT.md
+- [ ] Create issue templates
+- [ ] Set up pull request template
+
+### Optional Enhancements
+- [ ] Add logo/banner to README
+- [ ] Create SECURITY.md for vulnerability reporting  
+- [ ] Set up automated dependency updates
+- [ ] Configure release automation
+
+---
+*This issue was automatically created to help you get started with your new repository.*" \
+            --label "documentation" \
+            --label "enhancement" \
+            --label "good first issue"
