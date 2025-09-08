@@ -1,0 +1,109 @@
+name: Repository Metadata Check
+
+on:
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check-metadata:
+    name: Check Repository Metadata
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup GitHub CLI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+      
+      - name: Check repository metadata
+        run: |
+          echo "=== Repository Metadata Check ==="
+          
+          # Get repository info
+          REPO_INFO=$(gh api repos/${{ github.repository }})
+          
+          # Check description
+          DESCRIPTION=$(echo "$REPO_INFO" | jq -r '.description // ""')
+          if [ -z "$DESCRIPTION" ]; then
+            echo "❌ Missing repository description"
+            echo "::warning::Repository is missing a description. Add one in Settings."
+          else
+            echo "✅ Repository has description: $DESCRIPTION"
+          fi
+          
+          # Check topics
+          TOPICS=$(echo "$REPO_INFO" | jq -r '.topics // [] | length')
+          if [ "$TOPICS" -eq 0 ]; then
+            echo "❌ No repository topics/tags"
+            echo "::warning::Repository has no topics. Add relevant topics in Settings."
+          else
+            echo "✅ Repository has $TOPICS topics"
+          fi
+          
+          # Check homepage URL
+          HOMEPAGE=$(echo "$REPO_INFO" | jq -r '.homepage // ""')
+          if [ -z "$HOMEPAGE" ]; then
+            echo "ℹ️  No homepage URL set (optional)"
+          else
+            echo "✅ Homepage URL: $HOMEPAGE"
+          fi
+          
+          # Create issue if metadata is incomplete
+          if [ -z "$DESCRIPTION" ] || [ "$TOPICS" -eq 0 ]; then
+            # Check if issue already exists
+            EXISTING_ISSUE=$(gh issue list --label "documentation" --label "automated" --state open --json number --jq '.[0].number // 0')
+            
+            if [ "$EXISTING_ISSUE" -eq 0 ]; then
+              ISSUE_BODY="This automated check found incomplete repository metadata:
+
+"
+              if [ -z "$DESCRIPTION" ]; then
+                ISSUE_BODY="${ISSUE_BODY}### Missing Description
+Please add a clear, concise description to help users understand this repository's purpose.
+
+**How to fix:**
+1. Go to Settings → Edit repository details
+2. Add a description (50-100 characters)
+3. Save changes
+
+"
+              fi
+              
+              if [ "$TOPICS" -eq 0 ]; then
+                ISSUE_BODY="${ISSUE_BODY}### Missing Topics/Tags
+Topics help users discover your repository. Please add 3-5 relevant topics.
+
+**How to fix:**
+1. Go to the repository main page
+2. Click the gear icon next to 'About'
+3. Add relevant topics (e.g., language, framework, purpose)
+4. Save changes
+
+**Suggested topics based on common patterns:**
+- Programming language (e.g., \`typescript\`, \`python\`, \`javascript\`)
+- Framework/library (e.g., \`react\`, \`nodejs\`, \`django\`)
+- Purpose (e.g., \`api\`, \`cli-tool\`, \`web-app\`)
+- Organization-specific (e.g., \`chittyapps\`, \`civic-tech\`)
+"
+              fi
+              
+              ISSUE_BODY="${ISSUE_BODY}
+---
+*This issue was automatically created by the Repository Metadata Check workflow.*"
+              
+              gh issue create \
+                --title "📋 Incomplete Repository Metadata" \
+                --body "$ISSUE_BODY" \
+                --label "documentation" \
+                --label "automated" \
+                --label "good first issue"
+                
+              echo "📋 Created issue for incomplete metadata"
+            else
+              echo "ℹ️  Issue #$EXISTING_ISSUE already exists for metadata updates"
+            fi
+          fi
