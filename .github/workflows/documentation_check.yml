@@ -1,0 +1,141 @@
+name: Documentation Check
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  check-documentation:
+    name: Check Repository Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Check for required documentation files
+        id: doc-check
+        run: |
+          echo "=== Documentation Check ==="
+          
+          # Initialize status
+          status="pass"
+          missing_files=""
+          
+          # Check for README
+          if [ ! -f "README.md" ] && [ ! -f "README" ] && [ ! -f "readme.md" ]; then
+            echo "❌ Missing: README file"
+            missing_files="$missing_files README.md"
+            status="fail"
+          else
+            echo "✅ Found: README file"
+          fi
+          
+          # Check for LICENSE
+          if [ ! -f "LICENSE" ] && [ ! -f "LICENSE.md" ] && [ ! -f "LICENSE.txt" ]; then
+            echo "⚠️  Missing: LICENSE file (recommended)"
+            missing_files="$missing_files LICENSE"
+          else
+            echo "✅ Found: LICENSE file"
+          fi
+          
+          # Check for CONTRIBUTING guidelines
+          if [ ! -f "CONTRIBUTING.md" ] && [ ! -f "contributing.md" ]; then
+            echo "ℹ️  Missing: CONTRIBUTING.md (optional but recommended)"
+          else
+            echo "✅ Found: CONTRIBUTING guidelines"
+          fi
+          
+          # Check for Code of Conduct
+          if [ ! -f "CODE_OF_CONDUCT.md" ] && [ ! -f "code_of_conduct.md" ]; then
+            echo "ℹ️  Missing: CODE_OF_CONDUCT.md (optional)"
+          else
+            echo "✅ Found: Code of Conduct"
+          fi
+          
+          # Set outputs
+          echo "status=$status" >> $GITHUB_OUTPUT
+          echo "missing_files=$missing_files" >> $GITHUB_OUTPUT
+          
+      - name: Check README quality
+        if: success()
+        run: |
+          echo "=== README Quality Check ==="
+          
+          # Find README file
+          README_FILE=""
+          for file in README.md README readme.md; do
+            if [ -f "$file" ]; then
+              README_FILE="$file"
+              break
+            fi
+          done
+          
+          if [ -n "$README_FILE" ]; then
+            # Check README length
+            lines=$(wc -l < "$README_FILE")
+            if [ "$lines" -lt 10 ]; then
+              echo "⚠️  README is very short ($lines lines). Consider adding more detail."
+            else
+              echo "✅ README has $lines lines"
+            fi
+            
+            # Check for essential sections
+            essential_sections=(
+              "## Installation"
+              "## Usage"
+              "## Contributing"
+              "## License"
+            )
+            
+            echo ""
+            echo "Checking for essential sections:"
+            for section in "${essential_sections[@]}"; do
+              if grep -q "$section" "$README_FILE"; then
+                echo "✅ Found: $section"
+              else
+                echo "⚠️  Missing: $section"
+              fi
+            done
+          fi
+          
+      - name: Post PR comment
+        if: github.event_name == 'pull_request' && steps.doc-check.outputs.status == 'fail'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const missing = '${{ steps.doc-check.outputs.missing_files }}'.trim().split(' ');
+            const body = `## 📋 Documentation Check
+            
+            This repository is missing required documentation:
+            
+            ${missing.map(file => `- ❌ \`${file}\``).join('\n')}
+            
+            Please add the missing documentation files before merging this PR.
+            
+            ### Quick Start
+            
+            You can use our templates:
+            - [README Template](https://github.com/${{ github.repository_owner }}/jumpoff/blob/main/templates/README_TEMPLATE.md)
+            - [LICENSE Chooser](https://github.com/${{ github.repository_owner }}/jumpoff/blob/main/templates/LICENSE_CHOOSER.md)
+            - [Contributing Template](https://github.com/${{ github.repository_owner }}/jumpoff/blob/main/templates/CONTRIBUTING_TEMPLATE.md)
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+      
+      - name: Fail if required docs missing
+        if: steps.doc-check.outputs.status == 'fail'
+        run: |
+          echo "❌ Documentation check failed!"
+          echo "Missing required files: ${{ steps.doc-check.outputs.missing_files }}"
+          exit 1
