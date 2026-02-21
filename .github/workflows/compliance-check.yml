@@ -1,0 +1,148 @@
+name: Compliance Check
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  compliance:
+    name: ChittyOS Compliance Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check canonical files
+        id: canon
+        run: |
+          echo "=== Canon Compliance ==="
+          issues=0
+
+          # CLAUDE.md
+          if [ -f "CLAUDE.md" ]; then
+            echo "✅ CLAUDE.md"
+          else
+            echo "⚠️  Missing: CLAUDE.md (development guide for Claude Code)"
+            issues=$((issues + 1))
+          fi
+
+          # .gitignore
+          if [ -f ".gitignore" ]; then
+            echo "✅ .gitignore"
+            # Check .env is excluded
+            if grep -q '\.env' .gitignore; then
+              echo "✅ .gitignore excludes .env"
+            else
+              echo "⚠️  .gitignore does not exclude .env files"
+              issues=$((issues + 1))
+            fi
+          else
+            echo "❌ Missing: .gitignore"
+            issues=$((issues + 1))
+          fi
+
+          # Check for committed secrets
+          if git ls-files | grep -qE '\.env$|\.env\.local$' 2>/dev/null; then
+            echo "❌ CRITICAL: .env file is tracked by git!"
+            issues=$((issues + 1))
+          else
+            echo "✅ No .env files tracked"
+          fi
+
+          echo "canon_issues=$issues" >> $GITHUB_OUTPUT
+
+      - name: Check Copilot agent
+        id: agent
+        run: |
+          echo "=== Agent Check ==="
+          if [ -d ".github/agents" ] && ls .github/agents/*.agent.md 1>/dev/null 2>&1; then
+            count=$(ls .github/agents/*.agent.md | wc -l)
+            echo "✅ Found $count Copilot agent(s)"
+            for f in .github/agents/*.agent.md; do
+              name=$(grep -m1 '^name:' "$f" | sed 's/name: *//' || echo "unnamed")
+              echo "   - $name ($f)"
+            done
+          else
+            echo "ℹ️  No Copilot agents configured (optional)"
+          fi
+
+      - name: Check Cloudflare Worker config
+        id: worker
+        run: |
+          echo "=== Worker Check ==="
+          issues=0
+
+          if [ -f "wrangler.toml" ] || [ -f "config/wrangler.toml" ]; then
+            TOML=$(find . -name "wrangler.toml" -not -path "*/node_modules/*" | head -1)
+            echo "✅ Found $TOML"
+
+            # Check for empty binding IDs
+            empty_ids=$(grep -c 'id = ""' "$TOML" 2>/dev/null || echo "0")
+            empty_db=$(grep -c 'database_id = ""' "$TOML" 2>/dev/null || echo "0")
+            if [ "$empty_ids" -gt 0 ] || [ "$empty_db" -gt 0 ]; then
+              echo "⚠️  Found empty binding IDs in $TOML (KV: $empty_ids, D1: $empty_db)"
+              issues=$((issues + 1))
+            else
+              echo "✅ All binding IDs populated"
+            fi
+          else
+            echo "ℹ️  No wrangler.toml (not a Cloudflare Worker)"
+          fi
+
+          echo "worker_issues=$issues" >> $GITHUB_OUTPUT
+
+      - name: Check health endpoint source
+        id: health
+        run: |
+          echo "=== Health Endpoint Check ==="
+          if [ -f "wrangler.toml" ] || [ -f "config/wrangler.toml" ]; then
+            # Worker repo — check for /health route
+            if grep -rq "health" src/ 2>/dev/null; then
+              echo "✅ Health endpoint found in source"
+            else
+              echo "⚠️  No /health endpoint found in src/"
+            fi
+          fi
+
+      - name: Check Python dependencies
+        id: python
+        run: |
+          echo "=== Python Check ==="
+          if ls *.py lib/*.py bin/*.py 2>/dev/null | head -1 > /dev/null 2>&1; then
+            if [ -f "requirements.txt" ]; then
+              echo "✅ requirements.txt exists"
+            else
+              echo "⚠️  Python files found but no requirements.txt"
+            fi
+          fi
+
+      - name: Check JS dependencies
+        id: js
+        run: |
+          echo "=== JS Check ==="
+          if [ -f "package.json" ]; then
+            if [ -f "package-lock.json" ] || [ -f "pnpm-lock.yaml" ] || [ -f "yarn.lock" ]; then
+              echo "✅ Lockfile exists"
+            else
+              echo "⚠️  package.json found but no lockfile"
+            fi
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          canon=${{ steps.canon.outputs.canon_issues || 0 }}
+          worker=${{ steps.worker.outputs.worker_issues || 0 }}
+          total=$((canon + worker))
+
+          echo "## Compliance Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$total" -eq 0 ]; then
+            echo "All checks passed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**$total issue(s) found.** See job log for details." >> $GITHUB_STEP_SUMMARY
+          fi
