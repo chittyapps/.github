@@ -1,0 +1,99 @@
+name: Sync Services Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_preflight:
+        description: 'Skip preflight checks (not recommended)'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install notion-client pyyaml
+
+      - name: Preflight checks
+        if: ${{ !inputs.skip_preflight }}
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          python scripts/preflight.py --bundle services
+
+      - name: Dry-run export
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          CHITTY_ID: ${{ vars.CHITTY_ID || 'services-sync-workflow' }}
+        run: |
+          echo "Running dry-run to validate export..."
+          python scripts/export_bundles.py services --dry-run
+
+      - name: Export services bundle
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          CHITTY_ID: ${{ vars.CHITTY_ID || 'services-sync-workflow' }}
+        run: |
+          python scripts/export_bundles.py services
+
+      - name: Verify bundle
+        run: |
+          python scripts/verify_bundle.py services
+
+      - name: Check for changes
+        id: git_status
+        run: |
+          git diff --exit-code packages/services/data/ || echo "has_changes=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push
+        if: steps.git_status.outputs.has_changes == 'true'
+        run: |
+          git config user.name "chittyapps-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add packages/services/
+          git commit -m "sync(services): automated export $(date +%Y-%m-%d)
+
+          Bundle: services
+          Exported by: ${{ github.actor }}
+          ChittyID: ${{ vars.CHITTY_ID || 'services-sync-workflow' }}
+          Workflow: ${{ github.workflow }}"
+          git push
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Services Bundle Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Bundle:** services" >> $GITHUB_STEP_SUMMARY
+          echo "**ChittyID:** ${{ vars.CHITTY_ID || 'services-sync-workflow' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Changes:** ${{ steps.git_status.outputs.has_changes || 'none' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f packages/services/manifest.json ]; then
+            echo "### Manifest" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat packages/services/manifest.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
