@@ -38,9 +38,24 @@ Explore our projects organized by purpose and technology:
 All our repositories follow consistent standards:
 
 - ✅ Clear documentation (README, CONTRIBUTING, LICENSE)
-- ✅ Proper tagging and descriptions  
+- ✅ Proper tagging and descriptions
 - ✅ Code quality practices
 - ✅ Community guidelines
+- ✅ **Fractal trinity layout** (identity / authority / connectivity / scopes)
+- ✅ Compliance triad: CHARTER.md + CHITTY.md + CLAUDE.md
+- ✅ Canonical entity types: P/L/T/E/A (Person, Location, Thing, Event, Authority)
+
+## Starter Template (BINDING for new repos)
+
+**[chittyseed-fractal](https://github.com/chittyfoundation/chittyseed-fractal)** — every new ChittyApps repo MUST start from this template. Click "Use this template" on the GitHub repo page, or run:
+
+```bash
+gh repo create chittyapps/<your-app> --template chittyfoundation/chittyseed-fractal --public
+```
+
+The template encodes the fractal trinity layout (identity / authority / connectivity), provides the standard `scope.json` manifest, CHARTER/CHITTY/CLAUDE templates, package.json with `validate:fractal` + `certify` scripts, and a CI workflow that gates merges on fractal-layout compliance.
+
+Validation contract: `chittycanon://core/services/chittyschema#meta/fractal-layout`
 
 ---
 
